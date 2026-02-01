@@ -33,7 +33,6 @@ COPY --from=builder /install /usr/local/
 
 # Copy the bot script
 COPY TelegramBot.py .
-COPY cookies.txt .
 
 # Create downloads directory
 RUN mkdir downloads
