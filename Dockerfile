@@ -37,8 +37,7 @@ COPY TelegramBot.py .
 # Create downloads directory
 RUN mkdir downloads
 
-# Set environment variables
-ENV BOT_TOKEN=""
+
 
 # Run the bot
 CMD ["python", "TelegramBot.py"]
