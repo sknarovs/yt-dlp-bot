@@ -54,6 +54,22 @@ def download_video(url: str) -> str:
     return file_path
 
 
+async def send_chat_action_periodically(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    action: str,
+    stop_event: asyncio.Event,
+):
+    """Sends a chat action periodically until the stop_event is set."""
+    while not stop_event.is_set():
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=action)
+            await asyncio.sleep(4.5)  # Telegram actions timeout is 5 seconds
+        except Exception as e:
+            logger.warning("Could not send chat action: %s", e)
+            break
+
+
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handles messages with URLs.
@@ -70,78 +86,90 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for url in urls:
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id, action="upload_video"
+        stop_sending_action = asyncio.Event()
+        send_action_task = context.application.create_task(
+            send_chat_action_periodically(
+                context,
+                update.effective_chat.id,
+                "upload_video",
+                stop_sending_action,
+            )
         )
 
         file_path = None
-
-        # Download with retries (run in thread to avoid blocking)
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                file_path = await asyncio.to_thread(download_video, url)
-                break
-            except DownloadError as e:
-                logger.warning("No downloadable video for URL %s (error: %s)", url, e)
-                file_path = None
-                break  # non-retryable
-            except Exception as e:
-                if attempt < MAX_RETRIES:
+        try:
+            # Download with retries (run in thread to avoid blocking)
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    file_path = await asyncio.to_thread(download_video, url)
+                    break
+                except DownloadError as e:
                     logger.warning(
-                        "Download failed (attempt %d/%d) for URL %s: %s",
-                        attempt,
-                        MAX_RETRIES,
-                        url,
-                        e,
-                    )
-                else:
-                    logger.error(
-                        "Download failed after %d attempts for URL %s: %s",
-                        MAX_RETRIES,
-                        url,
-                        e,
+                        "No downloadable video for URL %s (error: %s)", url, e
                     )
                     file_path = None
+                    break  # non-retryable
+                except Exception as e:
+                    if attempt < MAX_RETRIES:
+                        logger.warning(
+                            "Download failed (attempt %d/%d) for URL %s: %s",
+                            attempt,
+                            MAX_RETRIES,
+                            url,
+                            e,
+                        )
+                    else:
+                        logger.error(
+                            "Download failed after %d attempts for URL %s: %s",
+                            MAX_RETRIES,
+                            url,
+                            e,
+                        )
+                        file_path = None
 
-        if not file_path:
-            continue  # skip to next URL
+            if not file_path:
+                continue  # skip to next URL
 
-        # Check file size before sending
-        if os.path.getsize(file_path) > MAX_SIZE:
-            logger.warning("File %s exceeds max size, skipping", file_path)
-            os.remove(file_path)
-            continue
+            # Check file size before sending
+            if os.path.getsize(file_path) > MAX_SIZE:
+                logger.warning("File %s exceeds max size, skipping", file_path)
+                os.remove(file_path)
+                continue
 
-        # Send video with retries
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                await context.bot.send_video(
-                    chat_id=update.effective_chat.id,
-                    video=file_path,
-                    reply_parameters=ReplyParameters(
-                        message_id=update.message.message_id
-                    ),
-                )
-                break
-            except Exception as e:
-                if attempt < MAX_RETRIES:
-                    logger.warning(
-                        "Upload failed (attempt %d/%d) for file %s: %s",
-                        attempt,
-                        MAX_RETRIES,
-                        file_path,
-                        e,
+            # Send video with retries
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    await context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=file_path,
+                        reply_parameters=ReplyParameters(
+                            message_id=update.message.message_id
+                        ),
                     )
-                else:
-                    logger.error(
-                        "Upload failed after %d attempts for file %s: %s",
-                        MAX_RETRIES,
-                        file_path,
-                        e,
-                    )
+                    break
+                except Exception as e:
+                    if attempt < MAX_RETRIES:
+                        logger.warning(
+                            "Upload failed (attempt %d/%d) for file %s: %s",
+                            attempt,
+                            MAX_RETRIES,
+                            file_path,
+                            e,
+                        )
+                    else:
+                        logger.error(
+                            "Upload failed after %d attempts for file %s: %s",
+                            MAX_RETRIES,
+                            file_path,
+                            e,
+                        )
+        finally:
+            # Stop the chat action task
+            stop_sending_action.set()
+            await send_action_task
 
         # Cleanup file
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
 
