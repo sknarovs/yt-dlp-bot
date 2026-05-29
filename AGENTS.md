@@ -42,4 +42,9 @@ Key dependencies: `python-telegram-bot`, `yt-dlp`, `yt-dlp-ejs`. The `yt-dlp-ejs
 
 ## CI
 
-GitHub Actions builds multi-arch Docker image (amd64 + arm64) on push to `main`, pushes to `ghcr.io/sknarovs/yt-dlp-bot:latest`.
+Two workflows in `.github/workflows/`:
+
+- **docker-build.yml** — builds and pushes multi-arch Docker image on push to `main`
+- **yt-dlp-release.yml** — daily check for new yt-dlp releases; rebuilds image if new version detected, also tags with yt-dlp version
+
+`.yt-dlp-version` tracks last-built yt-dlp release. The release workflow commits updates to this file back to `main`.
