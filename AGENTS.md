@@ -1,24 +1,13 @@
 # AGENTS.md
 
-## Project Overview
-
-Single-file Telegram bot (`TelegramBot.py`) that downloads videos via yt-dlp and sends them to chat. No packages, no modules — the entire app lives in one file.
-
 ## Running
 
 ```bash
-# Required env var (missing token crashes at startup)
-export BOT_TOKEN="..."
-
-# Run directly
+export BOT_TOKEN="..."  # required — hard crash (KeyError) if missing
 python TelegramBot.py
-
-# Or via Docker
-docker build -t yt-dlp-bot .
-docker run -e BOT_TOKEN="..." yt-dlp-bot
 ```
 
-Python 3.11+ required. `ffmpeg` must be installed locally.
+Python 3.11+ and `ffmpeg` must be installed. For Docker: `docker build -t yt-dlp-bot . && docker run -e BOT_TOKEN="..." yt-dlp-bot`.
 
 ## Dependencies
 
@@ -26,25 +15,28 @@ Python 3.11+ required. `ffmpeg` must be installed locally.
 pip install -r requirements.txt
 ```
 
-Key dependencies: `python-telegram-bot`, `yt-dlp`, `yt-dlp-ejs`. The `yt-dlp-ejs` package requires Deno at runtime (Docker image installs it).
-
-## Configuration
-
-- `BOT_TOKEN` env var — **required**, no default, hard crash if missing
-- `cookies.txt` — optional, place at project root for authenticated site downloads
-- `MAX_SIZE` — 45 MB hardcoded in `TelegramBot.py`, not configurable via env
+`yt-dlp-ejs` requires **Deno** at runtime (the Dockerfile installs it; local dev needs Deno on PATH).
 
 ## Architecture
 
-- `TelegramBot.py` — entire application: config, download logic, bot handlers, entrypoint
-- `downloads/` — created at runtime for temp files, gitignored
-- No tests, linter, formatter, or type checker configured
+Single-file app: `TelegramBot.py` contains all config, download logic, bot handlers, and entrypoint. No packages, no modules.
+
+- `downloads/` — created at **import time** via `os.makedirs`, gitignored
+- `cookies.txt` — optional, place at project root for authenticated downloads
+
+## Non-obvious behavior
+
+- **No playlist downloads** — `noplaylist: True` is hardcoded in yt-dlp opts
+- **Download format** — capped at 720p (`bestvideo[height<=720]+bestaudio`), merged to mp4
+- **MAX_SIZE = 45 MB** — hardcoded, not configurable via env. Applied both as yt-dlp `max_filesize` and as a post-download check that deletes the file
+- **Retry logic** — `DownloadError` is **not retried** (breaks immediately); other exceptions retry up to `MAX_RETRIES=3`
+- **Downloads run in a thread pool** (`asyncio.to_thread`) — blocking yt-dlp calls don't block the event loop
 
 ## CI
 
-Two workflows in `.github/workflows/`:
+- **docker-build.yml** — builds and pushes multi-arch (amd64 + arm64) image to `ghcr.io` on push to `main`
+- **yt-dlp-release.yml** — daily cron checks for new yt-dlp release; rebuilds image if new version detected, also tags with yt-dlp version. Commits updated `.yt-dlp-version` back to `main`
 
-- **docker-build.yml** — builds and pushes multi-arch Docker image on push to `main`
-- **yt-dlp-release.yml** — daily check for new yt-dlp releases; rebuilds image if new version detected, also tags with yt-dlp version
+## Quality
 
-`.yt-dlp-version` tracks last-built yt-dlp release. The release workflow commits updates to this file back to `main`.
+No tests, linter, formatter, or type checker configured.
