@@ -27,10 +27,12 @@ Single-file app: `TelegramBot.py` contains all config, download logic, bot handl
 ## Non-obvious behavior
 
 - **No playlist downloads** — `noplaylist: True` is hardcoded in yt-dlp opts
-- **Download format** — capped at 720p (`bestvideo[height<=720]+bestaudio`), merged to mp4
+- **Download format** — capped at 720p (`bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best`), merged to mp4
 - **MAX_SIZE = 45 MB** — hardcoded, not configurable via env. Applied both as yt-dlp `max_filesize` and as a post-download check that deletes the file
-- **Retry logic** — `DownloadError` is **not retried** (breaks immediately); other exceptions retry up to `MAX_RETRIES=3`
+- **No retry on download/upload failure** — errors are logged and the URL is skipped
+- **Multiple URLs per message** — processed sequentially, not in parallel
 - **Downloads run in a thread pool** (`asyncio.to_thread`) — blocking yt-dlp calls don't block the event loop
+- **Chat action heartbeat** — sends `upload_video` action every 4.5s during download/upload so Telegram shows "sending video…"
 
 ## CI
 

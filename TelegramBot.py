@@ -11,11 +11,9 @@ from telegram.ext import (
     filters,
 )
 from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
 
 # Config
 MAX_SIZE = 45 * 1024 * 1024  # 45 MB
-MAX_RETRIES = 3
 DOWNLOAD_FOLDER = "downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
@@ -98,71 +96,30 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         file_path = None
         try:
-            # Download with retries (run in thread to avoid blocking)
-            for attempt in range(1, MAX_RETRIES + 1):
-                try:
-                    file_path = await asyncio.to_thread(download_video, url)
-                    break
-                except DownloadError as e:
-                    logger.warning(
-                        "No downloadable video for URL %s (error: %s)", url, e
-                    )
-                    file_path = None
-                    break  # non-retryable
-                except Exception as e:
-                    if attempt < MAX_RETRIES:
-                        logger.warning(
-                            "Download failed (attempt %d/%d) for URL %s: %s",
-                            attempt,
-                            MAX_RETRIES,
-                            url,
-                            e,
-                        )
-                    else:
-                        logger.error(
-                            "Download failed after %d attempts for URL %s: %s",
-                            MAX_RETRIES,
-                            url,
-                            e,
-                        )
-                        file_path = None
+            try:
+                file_path = await asyncio.to_thread(download_video, url)
+            except Exception as e:
+                logger.error("Download failed for URL %s: %s", url, e)
+                file_path = None
 
             if not file_path:
-                continue  # skip to next URL
+                continue
 
-            # Check file size before sending
             if os.path.getsize(file_path) > MAX_SIZE:
                 logger.warning("File %s exceeds max size, skipping", file_path)
                 os.remove(file_path)
                 continue
 
-            # Send video with retries
-            for attempt in range(1, MAX_RETRIES + 1):
-                try:
-                    await context.bot.send_video(
-                        chat_id=update.effective_chat.id,
-                        video=file_path,
-                        reply_parameters=ReplyParameters(
-                            message_id=update.message.message_id
-                        ),
-                    )
-                    break
-                except Exception as e:
-                    if attempt < MAX_RETRIES:
-                        logger.warning(
-                            "Upload failed (attempt %d/%d) for file %s: %s",
-                            attempt,
-                            MAX_RETRIES,
-                            file_path,
-                            e,
-                        )
-                    else:
-                        logger.error(
-                            "Upload failed after %d attempts for file %s: %s",
-                            MAX_RETRIES,
-                            file_path,
-                            e,
-                        )
+            try:
+                await context.bot.send_video(
+                    chat_id=update.effective_chat.id,
+                    video=file_path,
+                    reply_parameters=ReplyParameters(
+                        message_id=update.message.message_id
+                    ),
+                )
+            except Exception as e:
+                logger.error("Upload failed for file %s: %s", file_path, e)
         finally:
             # Stop the chat action task
             stop_sending_action.set()
