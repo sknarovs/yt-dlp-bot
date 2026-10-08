@@ -1,6 +1,7 @@
 package lv.sknarovs.bot;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -40,5 +41,11 @@ class MainTest {
         assertThrows(TelegramApiRequestException.class, () -> Main.waitUntilApiReachable(client, Duration.ofMillis(10)));
 
         verify(client, times(1)).execute(any(GetMe.class));
+    }
+
+    @Test
+    void uploadClientWaitsLongEnoughForSlowUplinks() {
+        // 2000 MB at ~1.5 Mbit/s takes about 3 hours
+        assertTrue(Main.createHttpClient().readTimeoutMillis() >= Duration.ofHours(3).toMillis());
     }
 }

@@ -30,15 +30,11 @@ public class Main {
 
         Files.createDirectories(config.downloadDir());
 
-        // The local Bot API server answers sendVideo only after it has re-uploaded the file to Telegram,
-        // so the read timeout has to cover a full 2 GB transfer.
-        OkHttpClient httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(75))
-                .writeTimeout(Duration.ofMinutes(5))
-                .readTimeout(Duration.ofMinutes(30))
-                .build();
+        OkHttpClient httpClient = createHttpClient();
         var client = new OkHttpTelegramClient(httpClient, config.botToken(), config.telegramApiUrl());
-        var bot = new VideoBot(client, new YtDlpDownloader(config), config.maxFileSizeBytes());
+        var downloader = new YtDlpDownloader(config);
+        downloader.clearDownloadDir(); // leftovers from a run that was killed mid-download
+        var bot = new VideoBot(client, downloader, config.maxFileSizeBytes());
 
         // Registering starts polling immediately and fails hard if the API server is down,
         // which is common right after `compose up` while telegram-bot-api is still starting.
@@ -69,6 +65,18 @@ public class Main {
      * Blocks until the API server answers. Connection failures are retried; an error response from the
      * server (e.g. 401 for a wrong token) is thrown, since retrying will not fix it.
      */
+    /**
+     * The local Bot API server answers sendVideo only after it has re-uploaded the file to Telegram,
+     * so the read timeout has to cover a 2000 MB transfer on a slow uplink (~1.5 Mbit/s → ~3 h).
+     */
+    static OkHttpClient createHttpClient() {
+        return new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(75))
+                .writeTimeout(Duration.ofMinutes(5))
+                .readTimeout(Duration.ofHours(4))
+                .build();
+    }
+
     static void waitUntilApiReachable(TelegramClient client, Duration retryInterval)
             throws InterruptedException, TelegramApiRequestException {
         while (true) {

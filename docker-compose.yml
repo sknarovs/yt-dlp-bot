@@ -14,6 +14,9 @@ services:
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       TELEGRAM_API_URL: http://telegram-bot-api:8081
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-2000}
+    # Reaps yt-dlp/ffmpeg processes that get orphaned when a download is killed
+    init: true
     depends_on:
       - telegram-bot-api
     restart: unless-stopped

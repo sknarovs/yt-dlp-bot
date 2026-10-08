@@ -1,5 +1,6 @@
 package lv.sknarovs.bot;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -68,6 +69,18 @@ class VideoBotTest {
     }
 
     @Test
+    void consumeSurvivesClosedExecutor() {
+        bot.close();
+
+        assertDoesNotThrow(() -> bot.consume(List.of(update(message("https://a.com", url(0, 13))))));
+    }
+
+    @Test
+    void consumeSurvivesEntityOutsideText() {
+        assertDoesNotThrow(() -> bot.consume(List.of(update(message("short", url(0, 50))))));
+    }
+
+    @Test
     void sendsVideoAsReplyAndDeletesFile() throws Exception {
         Path file = file("a.mp4", 10);
         when(downloader.download("https://a.com")).thenReturn(file);
@@ -127,6 +140,12 @@ class VideoBotTest {
             message.setEntities(List.of(entities));
         }
         return message;
+    }
+
+    private static Update update(Message message) {
+        var update = new Update();
+        update.setMessage(message);
+        return update;
     }
 
     private static MessageEntity url(int offset, int length) {

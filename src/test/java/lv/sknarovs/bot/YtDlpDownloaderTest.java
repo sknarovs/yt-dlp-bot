@@ -29,7 +29,7 @@ class YtDlpDownloaderTest {
                 "--no-playlist", "--no-progress",
                 "--print", "after_move:filepath",
                 "-o", "downloads/x.%(ext)s",
-                "https://e.com/v"),
+                "--", "https://e.com/v"),
                 downloader.buildCommand("https://e.com/v", "downloads/x.%(ext)s"));
     }
 
@@ -42,8 +42,9 @@ class YtDlpDownloaderTest {
 
         int last = command.size() - 1;
         assertEquals("https://e.com/v", command.get(last));
-        assertEquals(cookies.toString(), command.get(last - 1));
-        assertEquals("--cookies", command.get(last - 2));
+        assertEquals("--", command.get(last - 1));
+        assertEquals(cookies.toString(), command.get(last - 2));
+        assertEquals("--cookies", command.get(last - 3));
     }
 
     @Test
@@ -65,7 +66,7 @@ class YtDlpDownloaderTest {
         Path result = downloader.download("https://e.com/v");
 
         assertTrue(Files.exists(result));
-        assertEquals(tmp, result.getParent());
+        assertEquals(downloads(), result.getParent());
         assertTrue(result.getFileName().toString().endsWith(".mp4"));
     }
 
@@ -97,8 +98,98 @@ class YtDlpDownloaderTest {
         assertTrue(Duration.ofNanos(System.nanoTime() - start).compareTo(Duration.ofSeconds(5)) < 0);
     }
 
+    @Test
+    void failedDownloadRemovesPartialFiles() throws Exception {
+        String script = OUTPUT_ARG + """
+                touch "$(echo "$out" | sed 's/%(ext)s/f137.mp4.part/')"
+                exit 1
+                """;
+        var downloader = downloader(stub(script), Duration.ofSeconds(10));
+
+        assertThrows(DownloadException.class, () -> downloader.download("https://e.com/v"));
+
+        assertEquals(List.of(), listDownloads());
+    }
+
+    @Test
+    void extraOutputFilesAreRemoved() throws Exception {
+        String script = OUTPUT_ARG + """
+                first=$(echo "$out" | sed 's/%(ext)s/1.mp4/')
+                second=$(echo "$out" | sed 's/%(ext)s/2.mp4/')
+                touch "$first" "$second"
+                echo "$first"
+                echo "$second"
+                """;
+        var downloader = downloader(stub(script), Duration.ofSeconds(10));
+
+        Path result = downloader.download("https://e.com/v");
+
+        assertEquals(List.of(result), listDownloads());
+    }
+
+    @Test
+    void keepsResultWhenPrintedPathDiffersInForm() throws Exception {
+        // In production the download dir is relative ("downloads") but yt-dlp prints an absolute path.
+        String script = OUTPUT_ARG + """
+                file=$(echo "$out" | sed 's/%(ext)s/mp4/')
+                touch "$file"
+                realpath "$file"
+                """;
+        Path unnormalizedDir = downloads().resolve("..").resolve("downloads");
+        var downloader = new YtDlpDownloader(
+                stub(script).toString(), unnormalizedDir, tmp.resolve("cookies.txt"), 100, Duration.ofSeconds(10));
+
+        Path result = downloader.download("https://e.com/v");
+
+        assertTrue(Files.exists(result));
+    }
+
+    @Test
+    void timeoutDoesNotWaitForOrphanedChildren() throws Exception {
+        // The background sleep is reparented away from the script but keeps stdout open.
+        var downloader = downloader(stub("#!/bin/sh\n(sleep 30 &)\nsleep 30\n"), Duration.ofMillis(500));
+
+        long start = System.nanoTime();
+        assertThrows(DownloadException.class, () -> downloader.download("https://e.com/v"));
+
+        assertTrue(Duration.ofNanos(System.nanoTime() - start).compareTo(Duration.ofSeconds(5)) < 0);
+    }
+
+    @Test
+    void clearDownloadDirRemovesEverything() throws Exception {
+        Files.createFile(downloads().resolve("old.mp4"));
+        Files.createFile(downloads().resolve("old.f137.mp4.part"));
+
+        downloader(Path.of("yt-dlp"), Duration.ofSeconds(1)).clearDownloadDir();
+
+        assertEquals(List.of(), listDownloads());
+    }
+
+    private static final String OUTPUT_ARG = """
+            #!/bin/sh
+            out=""
+            while [ $# -gt 0 ]; do
+              if [ "$1" = "-o" ]; then out="$2"; fi
+              shift
+            done
+            """;
+
     private YtDlpDownloader downloader(Path executable, Duration timeout) {
-        return new YtDlpDownloader(executable.toString(), tmp, tmp.resolve("cookies.txt"), 100, timeout);
+        return new YtDlpDownloader(executable.toString(), downloads(), tmp.resolve("cookies.txt"), 100, timeout);
+    }
+
+    private Path downloads() {
+        try {
+            return Files.createDirectories(tmp.resolve("downloads"));
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    private List<Path> listDownloads() throws IOException {
+        try (var files = Files.list(downloads())) {
+            return files.toList();
+        }
     }
 
     private Path stub(String script) throws IOException {

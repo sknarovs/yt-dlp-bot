@@ -10,14 +10,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class YtDlpDownloader {
 
     private static final String FORMAT = "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best";
     private static final int STDERR_TAIL_LINES = 20;
+    private static final ExecutorService READERS = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Logger log = LoggerFactory.getLogger(YtDlpDownloader.class);
 
     private final String executable;
     private final Path downloadDir;
@@ -50,12 +55,33 @@ public class YtDlpDownloader {
             command.add("--cookies");
             command.add(cookiesFile.toString());
         }
+        command.add("--"); // a URL starting with '-' must never be parsed as an option
         command.add(url);
         return command;
     }
 
+    /** Removes everything in the download directory, e.g. files left behind by a previous run. */
+    public void clearDownloadDir() {
+        try (var files = Files.list(downloadDir)) {
+            files.forEach(YtDlpDownloader::deleteQuietly);
+        } catch (IOException e) {
+            log.warn("Could not clear {}: {}", downloadDir, e.getMessage());
+        }
+    }
+
     public Path download(String url) throws DownloadException {
-        String outputTemplate = downloadDir.resolve(UUID.randomUUID() + ".%(ext)s").toString();
+        String id = UUID.randomUUID().toString();
+        Path result = null;
+        try {
+            result = run(url, downloadDir.resolve(id + ".%(ext)s").toString());
+            return result;
+        } finally {
+            // Partial downloads, unmerged format files or extra videos yt-dlp produced for this URL
+            deleteOtherFiles(id, result);
+        }
+    }
+
+    private Path run(String url, String outputTemplate) throws DownloadException {
         Process process;
         try {
             process = new ProcessBuilder(buildCommand(url, outputTemplate)).start();
@@ -63,14 +89,12 @@ public class YtDlpDownloader {
             throw new DownloadException("Could not start yt-dlp", e);
         }
 
-        try (var readers = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<String> stdout = readers.submit(() -> readAll(process.getInputStream()));
-            Future<String> stderr = readers.submit(() -> readAll(process.getErrorStream()));
-
+        // Readers are not awaited on timeout: an orphaned child (ffmpeg, deno) may keep the pipes open.
+        Future<String> stdout = READERS.submit(() -> readAll(process.getInputStream()));
+        Future<String> stderr = READERS.submit(() -> readAll(process.getErrorStream()));
+        try {
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                readers.shutdownNow();
+                killTree(process);
                 throw new DownloadException("yt-dlp timed out after " + timeout + " for " + url);
             }
 
@@ -86,11 +110,38 @@ public class YtDlpDownloader {
             }
             return file;
         } catch (InterruptedException e) {
-            process.destroyForcibly();
+            killTree(process);
             Thread.currentThread().interrupt();
             throw new DownloadException("Interrupted while downloading " + url, e);
         } catch (ExecutionException e) {
             throw new DownloadException("Could not read yt-dlp output", e.getCause());
+        }
+    }
+
+    private static void killTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
+    private void deleteOtherFiles(String id, Path keep) {
+        // Compare names only: yt-dlp prints an absolute path while downloadDir may be relative
+        Path keepName = keep == null ? null : keep.getFileName();
+        try (var files = Files.newDirectoryStream(downloadDir, id + "*")) {
+            for (Path file : files) {
+                if (!file.getFileName().equals(keepName)) {
+                    deleteQuietly(file);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("Could not clean up files for {}: {}", id, e.getMessage());
+        }
+    }
+
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("Could not delete {}: {}", file, e.getMessage());
         }
     }
 

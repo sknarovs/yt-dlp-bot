@@ -46,8 +46,13 @@ public class VideoBot implements LongPollingUpdateConsumer {
     @Override
     public void consume(List<Update> updates) {
         for (Update update : updates) {
-            if (update.hasMessage() && !extractUrls(update.getMessage()).isEmpty()) {
-                handlers.submit(() -> handleMessage(update.getMessage()));
+            // An exception escaping here would silently stop the library's polling task
+            try {
+                if (update.hasMessage() && !extractUrls(update.getMessage()).isEmpty()) {
+                    handlers.submit(() -> handleMessage(update.getMessage()));
+                }
+            } catch (RuntimeException e) {
+                log.error("Could not handle update {}", update.getUpdateId(), e);
             }
         }
     }
