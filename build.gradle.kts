@@ -33,5 +33,5 @@ application {
 
 tasks.test {
     useJUnitPlatform()
-    jvmArgs("-javaagent:${mockitoAgent.asPath}")
+    jvmArgs("-javaagent:${mockitoAgent.asPath}", "-Xshare:off")
 }
