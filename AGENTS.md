@@ -29,7 +29,7 @@ Package `lv.sknarovs.bot`:
 - `VideoBot` — update consumer; per-URL download → size check → `sendVideo` → delete
 - `ChatActionHeartbeat` — "sending video…" chat action while working
 
-`downloads/` is created at startup and gitignored. `cookies.txt` (optional) in the working dir is passed to yt-dlp.
+`downloads/` is created and emptied at startup, and gitignored. `cookies.txt` (optional) in the working dir is passed to yt-dlp.
 
 ## Non-obvious behavior
 
@@ -40,11 +40,13 @@ Package `lv.sknarovs.bot`:
 - **MAX_FILE_SIZE_MB** (default 2000) — passed as yt-dlp `--max-filesize` and checked again after download (merged output can exceed it)
 - **yt-dlp exits 0 with no output when a file is over `--max-filesize`** — treated as a download failure
 - **File path comes from yt-dlp** — `--print after_move:filepath`, last non-blank stdout line
-- **yt-dlp timeout** — 30 minutes, then the process tree is killed
+- **yt-dlp timeout** — 30 minutes, then the process tree is killed (compose runs the bot with `init: true` to reap orphans)
+- **Download cleanup** — each download uses a `<uuid>.*` name; all other `<uuid>*` files (partials, unmerged formats, extra videos) are deleted; `downloads/` is emptied at startup
+- **URL is passed after `--`** — so it can never be parsed as a yt-dlp option
 - **No retry on download/upload failure** — logged, URL skipped, nothing sent to the user
 - **Concurrency** — each message on its own virtual thread; URLs within a message processed sequentially
 - **Chat action heartbeat** — `upload_video` every 4.5 s during download/upload
-- **Upload HTTP read timeout is 30 minutes** — the local server replies only after re-uploading to Telegram
+- **Upload HTTP read timeout is 4 hours** — the local server replies only after re-uploading to Telegram; sized for 2000 MB on a slow uplink
 
 ## CI
 
