@@ -1,4 +1,10 @@
+build/
+.gradle/
+.idea/
+*.iml
+.env
 downloads/
-venv/
 cookies.txt
+*.log
+.DS_Store
 GEMINI.md
