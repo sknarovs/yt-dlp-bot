@@ -4,7 +4,7 @@
 
 **Goal:** Replace `TelegramBot.py` with a Java 25 / Gradle bot that behaves the same, but uploads videos up to 2000 MB via a self-hosted Telegram Bot API server, packaged as an Alpine multi-arch image runnable under Docker and Podman.
 
-**Architecture:** Plain Java app (no framework), package `bot`: `BotConfig` (env), `YtDlpDownloader` (runs the `yt-dlp` CLI), `ChatActionHeartbeat` (periodic "sending video…"), `VideoBot` (update handling), `Main` (wiring). TelegramBots long-polling against a `telegram-bot-api` container started by docker-compose.
+**Architecture:** Plain Java app (no framework), package `lv.sknarovs.bot`: `BotConfig` (env), `YtDlpDownloader` (runs the `yt-dlp` CLI), `ChatActionHeartbeat` (periodic "sending video…"), `VideoBot` (update handling), `Main` (wiring). TelegramBots long-polling against a `telegram-bot-api` container started by docker-compose.
 
 **Tech Stack:** Java 25, Gradle 9.8.1 (Kotlin DSL, `application` plugin), TelegramBots 10.3.0 (`telegrambots-longpolling`, `telegrambots-client`), Logback 1.6.5, JUnit 6.1.3, Mockito 5.24.0, yt-dlp + yt-dlp-ejs (pip), Deno, ffmpeg, `eclipse-temurin:25-*-alpine`, `aiogram/telegram-bot-api`.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Java 25; Gradle Kotlin DSL; Gradle wrapper committed; no Spring.
-- Package `bot`, sources in `src/main/java/bot/`, tests in `src/test/java/bot/`.
+- Package `lv.sknarovs.bot`, sources in `src/main/java/lv/sknarovs/bot/`, tests in `src/test/java/lv/sknarovs/bot/`.
 - yt-dlp format string exactly: `bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best`; merge to `mp4`; no playlists.
 - Env vars: `BOT_TOKEN` (required), `TELEGRAM_API_URL` (default `http://telegram-bot-api:8081`), `MAX_FILE_SIZE_MB` (default `2000`).
 - Download dir `downloads`, cookies file `cookies.txt` (both relative to working dir).
@@ -41,12 +41,12 @@
 |---|---|
 | `settings.gradle.kts`, `build.gradle.kts`, `gradlew`, `gradlew.bat`, `gradle/wrapper/*` | Build |
 | `src/main/resources/logback.xml` | Console logging format |
-| `src/main/java/bot/BotConfig.java` | Env → config record, URL parsing |
-| `src/main/java/bot/DownloadException.java` | Checked exception for download failures |
-| `src/main/java/bot/YtDlpDownloader.java` | Build and run yt-dlp command |
-| `src/main/java/bot/ChatActionHeartbeat.java` | Periodic chat action, `AutoCloseable` |
-| `src/main/java/bot/VideoBot.java` | Update consumer, per-URL flow |
-| `src/main/java/bot/Main.java` | Wiring and startup |
+| `src/main/java/lv/sknarovs/bot/BotConfig.java` | Env → config record, URL parsing |
+| `src/main/java/lv/sknarovs/bot/DownloadException.java` | Checked exception for download failures |
+| `src/main/java/lv/sknarovs/bot/YtDlpDownloader.java` | Build and run yt-dlp command |
+| `src/main/java/lv/sknarovs/bot/ChatActionHeartbeat.java` | Periodic chat action, `AutoCloseable` |
+| `src/main/java/lv/sknarovs/bot/VideoBot.java` | Update consumer, per-URL flow |
+| `src/main/java/lv/sknarovs/bot/Main.java` | Wiring and startup |
 | `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `.env.example` | Containers |
 | `.github/workflows/docker-build.yml` | Action version bumps |
 | `README.md`, `AGENTS.md`, `.gitignore` | Docs / housekeeping |
@@ -57,9 +57,9 @@
 ### Task 1: Gradle project skeleton + `BotConfig`
 
 **Files:**
-- Create: `settings.gradle.kts`, `build.gradle.kts`, Gradle wrapper files, `src/main/resources/logback.xml`, `src/main/java/bot/BotConfig.java`
+- Create: `settings.gradle.kts`, `build.gradle.kts`, Gradle wrapper files, `src/main/resources/logback.xml`, `src/main/java/lv/sknarovs/bot/BotConfig.java`
 - Modify: `.gitignore`
-- Test: `src/test/java/bot/BotConfigTest.java`
+- Test: `src/test/java/lv/sknarovs/bot/BotConfigTest.java`
 
 **Interfaces:**
 - Produces:
@@ -70,11 +70,10 @@
 
 - [ ] **Step 1: Generate Gradle wrapper**
 
-No Gradle on PATH. Download the distribution into the scratchpad and run it from the project root:
+Gradle 9.8.1 is installed via SDKMAN. Non-interactive shells don't load SDKMAN, so source it first:
 ```bash
-curl -sLo $SCRATCH/gradle.zip https://services.gradle.org/distributions/gradle-9.8.1-bin.zip
-unzip -qo $SCRATCH/gradle.zip -d $SCRATCH
-$SCRATCH/gradle-9.8.1/bin/gradle wrapper --gradle-version 9.8.1 --distribution-type bin
+source ~/.sdkman/bin/sdkman-init.sh
+gradle wrapper --gradle-version 9.8.1 --distribution-type bin
 ```
 (create an empty `settings.gradle.kts` first with `rootProject.name = "yt-dlp-bot"`.)
 Expected: `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.{jar,properties}` exist.
@@ -103,7 +102,7 @@ dependencies {
 }
 
 application {
-    mainClass = "bot.Main"
+    mainClass = "lv.sknarovs.bot.Main"
     applicationName = "yt-dlp-bot"
 }
 
@@ -158,8 +157,8 @@ git commit -m "Add Gradle project and BotConfig"
 ### Task 2: `YtDlpDownloader`
 
 **Files:**
-- Create: `src/main/java/bot/DownloadException.java`, `src/main/java/bot/YtDlpDownloader.java`
-- Test: `src/test/java/bot/YtDlpDownloaderTest.java`
+- Create: `src/main/java/lv/sknarovs/bot/DownloadException.java`, `src/main/java/lv/sknarovs/bot/YtDlpDownloader.java`
+- Test: `src/test/java/lv/sknarovs/bot/YtDlpDownloaderTest.java`
 
 **Interfaces:**
 - Consumes: `BotConfig` (Task 1) — only in the convenience constructor.
@@ -196,7 +195,7 @@ git commit -m "Add Gradle project and BotConfig"
 
 - [ ] **Step 2: Run — expect compile failure**
 
-Run: `./gradlew test --tests bot.YtDlpDownloaderTest` → FAIL.
+Run: `./gradlew test --tests lv.sknarovs.bot.YtDlpDownloaderTest` → FAIL.
 
 - [ ] **Step 3: Implement**
 
@@ -220,8 +219,8 @@ git commit -m "Add YtDlpDownloader"
 ### Task 3: `ChatActionHeartbeat` + `VideoBot`
 
 **Files:**
-- Create: `src/main/java/bot/ChatActionHeartbeat.java`, `src/main/java/bot/VideoBot.java`
-- Test: `src/test/java/bot/VideoBotTest.java`
+- Create: `src/main/java/lv/sknarovs/bot/ChatActionHeartbeat.java`, `src/main/java/lv/sknarovs/bot/VideoBot.java`
+- Test: `src/test/java/lv/sknarovs/bot/VideoBotTest.java`
 
 **Interfaces:**
 - Consumes: `YtDlpDownloader.download(String) : Path throws DownloadException` (Task 2).
@@ -249,7 +248,7 @@ Helper: `message(String text, MessageEntity... entities)` building `Message` via
 
 - [ ] **Step 2: Run — expect compile failure**
 
-Run: `./gradlew test --tests bot.VideoBotTest` → FAIL.
+Run: `./gradlew test --tests lv.sknarovs.bot.VideoBotTest` → FAIL.
 
 - [ ] **Step 3: Implement `ChatActionHeartbeat`** per Interfaces.
 
@@ -271,7 +270,7 @@ git commit -m "Add VideoBot and ChatActionHeartbeat"
 ### Task 4: `Main` wiring
 
 **Files:**
-- Create: `src/main/java/bot/Main.java`
+- Create: `src/main/java/lv/sknarovs/bot/Main.java`
 
 **Interfaces:**
 - Consumes: `BotConfig.fromEnv`, `YtDlpDownloader(BotConfig)`, `VideoBot(TelegramClient, YtDlpDownloader, long)`.

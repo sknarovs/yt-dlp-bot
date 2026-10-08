@@ -69,7 +69,7 @@ upload ceiling by running a self-hosted Telegram Bot API server.
 
 ## Code structure
 
-Single Gradle module. Package `bot` in `src/main/java/bot/`.
+Single Gradle module. Package `lv.sknarovs.bot` in `src/main/java/lv/sknarovs/bot/`.
 
 ### `BotConfig` (record)
 
