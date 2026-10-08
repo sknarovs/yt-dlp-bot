@@ -18,7 +18,7 @@ public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final Duration API_RETRY_INTERVAL = Duration.ofSeconds(5);
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         BotConfig config;
         try {
             config = BotConfig.fromEnv(System.getenv());
