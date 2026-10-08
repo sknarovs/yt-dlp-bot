@@ -1,27 +1,28 @@
-# Stage 1: Build environment
-FROM python:3.11-alpine AS builder
+# Stage 1: build (runs on the build host's architecture; the jars are platform independent)
+FROM --platform=$BUILDPLATFORM docker.io/eclipse-temurin:25-jdk-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev
+WORKDIR /build
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle gradle
+RUN ./gradlew --no-daemon dependencies > /dev/null
 
-# Stage 2: Final image
-FROM python:3.11-alpine
+COPY src src
+RUN ./gradlew --no-daemon test installDist
+
+# Stage 2: runtime
+FROM docker.io/eclipse-temurin:25-jre-alpine
+
+RUN apk add --no-cache ffmpeg python3 deno \
+    && python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir yt-dlp yt-dlp-ejs
+
+ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-RUN apk add --no-cache ffmpeg curl unzip \
-    && curl -fsSL https://deno.land/install.sh | sh \
-    && apk del curl unzip
-
-ENV DENO_INSTALL="/root/.deno"
-ENV PATH="$DENO_INSTALL/bin:$PATH"
-
-COPY --from=builder /install /usr/local/
-
-COPY TelegramBot.py .
+COPY --from=builder /build/build/install/yt-dlp-bot/ /app/
 
 RUN mkdir downloads
 
-CMD ["python", "TelegramBot.py"]
+CMD ["/app/bin/yt-dlp-bot"]
